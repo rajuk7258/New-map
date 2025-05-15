@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Advanced Map Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2b2b2b">
+
+  <!-- Leaflet and Plugins -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.1.0/assets/css/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.fullscreen/Control.FullScreen.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.browser.print/dist/leaflet.browser.print.min.css" />
+
+  <style>
+    body, html {
+      margin: 0;
+      height: 100%;
+      font-family: Arial, sans-serif;
+    }
+    #topbar {
+      background: #2b2b2b;
+      color: white;
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #sidebar {
+      width: 250px;
+      background: #f4f4f4;
+      height: 100%;
+      position: absolute;
+      left: 0;
+      top: 50px;
+      bottom: 0;
+      overflow: auto;
+      border-right: 1px solid #ccc;
+      z-index: 999;
+      padding: 10px;
+    }
+    #map {
+      position: absolute;
+      left: 250px;
+      right: 0;
+      top: 50px;
+      bottom: 0;
+      z-index: 1;
+    }
+    @media (max-width: 768px) {
+      #sidebar {
+        width: 100%;
+        height: auto;
+        position: static;
+      }
+      #map {
+        position: absolute;
+        top: 100px;
+        left: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <div>Map Viewer</div>
+    <div>
+      <button onclick="map.locate({setView: true, maxZoom: 16})">My Location</button>
+      <button onclick="exportGeoJSON()">Export GeoJSON</button>
+      <button onclick="exportKML()">Export KML</button>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <h3>Layers</h3>
+    <label><input type="checkbox" id="osmLayerToggle" checked> OpenStreetMap</label><br>
+    <label><input type="checkbox" id="satelliteLayerToggle"> Satellite</label><br>
+    <label><input type="checkbox" id="esriLayerToggle"> ESRI Topo</label><br><br>
+    <input type="file" id="kml-input" accept=".kml" />
+    <p>Use the search bar and drawing tools on the map.</p>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+  <script src="https://unpkg.com/leaflet-geosearch@3.1.0/dist/bundle.min.js"></script>
+  <script src="https://unpkg.com/leaflet.fullscreen/Control.FullScreen.js"></script>
+  <script src="https://unpkg.com/tokml/tokml.js"></script>
+  <script src="https://unpkg.com/leaflet.browser.print/dist/leaflet.browser.print.min.js"></script>
+  <script src="https://unpkg.com/esri-leaflet@3/dist/esri-leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-kml"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+
+    const map = L.map('map', { fullscreenControl: true }).setView([20, 0], 2);
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const satellite = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] });
+    const esriTopo = L.esri.basemapLayer('Topographic');
+
+    document.getElementById('osmLayerToggle').onchange = e => e.target.checked ? map.addLayer(osm) : map.removeLayer(osm);
+    document.getElementById('satelliteLayerToggle').onchange = e => e.target.checked ? map.addLayer(satellite) : map.removeLayer(satellite);
+    document.getElementById('esriLayerToggle').onchange = e => e.target.checked ? map.addLayer(esriTopo) : map.removeLayer(esriTopo);
+
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+    map.addControl(new L.Control.Draw({ edit: { featureGroup: drawnItems } }));
+
+    map.on(L.Draw.Event.CREATED, e => drawnItems.addLayer(e.layer));
+    map.on('locationfound', e => L.circle(e.latlng, {radius: e.accuracy}).addTo(map));
+
+    const search = new window.GeoSearch.GeoSearchControl({ provider: new window.GeoSearch.OpenStreetMapProvider() });
+    map.addControl(search);
+
+    L.control.browserPrint({ title: 'Print Map' }).addTo(map);
+
+    function exportGeoJSON() {
+      const data = drawnItems.toGeoJSON();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "drawn_data.geojson";
+      a.click();
+    }
+
+    function exportKML() {
+      const geojson = drawnItems.toGeoJSON();
+      const kml = tokml(geojson);
+      const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'drawn_data.kml';
+      a.click();
+    }
+
+    document.getElementById('kml-input').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      if (file && file.name.endsWith('.kml')) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const parser = new DOMParser();
+          const kml = parser.parseFromString(e.target.result, 'text/xml');
+          const track = new L.KML(kml);
+          map.addLayer(track);
+          map.fitBounds(track.getBounds());
+        };
+        reader.readAsText(file);
+      } else {
+        alert('Please select a valid KML file.');
+      }
+    });
+  </script>
+</body>
+</html>
